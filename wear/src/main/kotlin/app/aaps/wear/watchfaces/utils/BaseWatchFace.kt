@@ -289,9 +289,13 @@ abstract class BaseWatchFace : WatchFace() {
     }
 
     open fun changeChartTimeframe() {
-        val currentTimeframe = sp.getString(R.string.key_chart_time_frame, "3").toIntOrNull() ?: 3
-        val newTimeframe = currentTimeframe % 5 + 1
-        sp.putString(R.string.key_chart_time_frame, newTimeframe.toString())
+    //    val currentTimeframe = sp.getString(R.string.key_chart_time_frame, "3").toIntOrNull() ?: 3
+    //    val newTimeframe = currentTimeframe % 5 + 1
+    //    sp.putString(R.string.key_chart_time_frame, newTimeframe.toString())
+        val currentFrame = sp.getInt(R.string.key_chart_time_frame, 6)
+        val newFrame = if (currentFrame == 3) 6 else 3
+        sp.putString(R.string.key_chart_time_frame, newFrame.toString())
+
         setupCharts()  // Rebuild the chart with new timeframe
         invalidate()   // Trigger redraw
     }

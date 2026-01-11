@@ -1300,6 +1300,53 @@ private fun computeEarlyDoseDecision(
     )
 }
 
+private data class PostPeakDamp(
+    val active: Boolean,
+    val factor: Double,
+    val reason: String
+)
+
+private fun computePostPeakDamp(
+    ctx: FCLvNextContext,
+    mealSignal: MealSignal,
+    peak: PeakEstimate,
+    now: DateTime,
+    config: FCLvNextConfig
+): PostPeakDamp {
+
+    // Alleen relevant in/na episode dynamiek, anders rem je “random highs”
+    val episodeLike =
+        mealSignal.state != MealState.NONE ||
+            peakEstimator.active ||
+            peak.state != PeakPredictionState.IDLE
+
+    if (!episodeLike) return PostPeakDamp(false, 1.0, "POSTPEAK: not episode-like")
+
+    // Jouw 16:30–17:00 patroon:
+    val highIob = ctx.iobRatio >= 0.55
+    val flattening = ctx.acceleration <= 0.05
+    val notRising = ctx.slope < 0.60
+    val reliable = ctx.consistency >= config.minConsistency
+
+    val postPeak = highIob && flattening && notRising && reliable
+
+    if (!postPeak) return PostPeakDamp(false, 1.0, "POSTPEAK: inactive")
+
+    // Zachte factor (geen harde cutoff), 0.35..0.85 range
+    val iobSeverity = smooth01((ctx.iobRatio - 0.55) / 0.35)      // 0..1
+    val accelSeverity = smooth01((0.05 - ctx.acceleration) / 0.15) // 0..1 (meer neg accel = meer rem)
+    val slopeSeverity = smooth01((0.60 - ctx.slope) / 0.80)       // 0..1
+
+    val severity = (0.45 * iobSeverity + 0.35 * accelSeverity + 0.20 * slopeSeverity).coerceIn(0.0, 1.0)
+    val factor = (1.0 - 0.65 * severity).coerceIn(0.35, 1.0)
+
+    return PostPeakDamp(
+        true,
+        factor,
+        "POSTPEAK: factor=${"%.2f".format(factor)} iobR=${"%.2f".format(ctx.iobRatio)} slope=${"%.2f".format(ctx.slope)} accel=${"%.2f".format(ctx.acceleration)}"
+    )
+}
+
 
 private fun trajectoryDampingFactor(
     ctx: FCLvNextContext,
@@ -2305,9 +2352,15 @@ class FCLvNext(
 
                 val prePeakMul = if (prePeakCommitWindow) 0.85 else 1.0
 
+                val postPeakDamp = computePostPeakDamp(ctx, mealSignal, peak, now, config)
+                if (postPeakDamp.active) {
+                    status.append(postPeakDamp.reason + " → commit damp\n")
+                }
+
+
                 val commitDose =
                     if (allowCommitBoost && commitAccessOk)
-                        (config.maxSMB * fraction * commitIobFactor * prePeakMul)
+                        (config.maxSMB * fraction * commitIobFactor * prePeakMul * postPeakDamp.factor)
                             .coerceAtMost(config.maxSMB)
                     else
                         0.0
@@ -2464,15 +2517,31 @@ class FCLvNext(
             // - nog boven target
             val topForming =
                 ctx.iobRatio >= 0.60 &&
-                    ctx.acceleration <= 0.15 &&
+                    ctx.acceleration <= 0.10 &&
                     ctx.deltaToTarget >= 1.2 &&
-                    ctx.consistency >= config.minConsistency
+                    ctx.consistency >= config.minConsistency &&
+                    ctx.recentSlope <= 0.35          // ✅ short-term stijging moet al “weg” zijn
+
+
+            val postPeakDamp2 = computePostPeakDamp(ctx, mealSignal, peak, now, config)
+            val postPeakNoStash =
+                postPeakDamp2.active &&
+                    ctx.acceleration <= 0.05 &&     // echt afvlakken/omkeer
+                    ctx.iobRatio >= 0.55 &&
+                    ctx.recentSlope <= 0.20         // short-term niet meer stijgend
+
+            if (postPeakNoStash) {
+                status.append(postPeakDamp2.reason + " → NO-STASH window\n")
+            }
+
 
             // stash-conditie: dip OF topvorming, maar niet tijdens sterke hernieuwde stijging
             val shouldStash =
-                mealLike &&
+                !postPeakNoStash &&
+                    mealLike &&
                     (shortTermDip || peakTopForming || topForming) &&
                     !strongRisingNow
+
 
             if (shouldStash) {
 

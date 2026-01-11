@@ -1188,13 +1188,9 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
     }
 
     private fun updateSensitivity() {
-        val prefs = context?.getSharedPreferences("FCL_Learning_Data", Context.MODE_PRIVATE)
-        val resistance = prefs?.getFloat("current_resistance", 1.0f)?.toDouble()
-
-
-      //  _binding ?: return
+        _binding ?: return
         val lastAutosensData = iobCobCalculator.ads.getLastAutosensData("Overview", aapsLogger, dateUtil)
-    /*    val lastAutosensRatio = lastAutosensData?.let { it.autosensResult.ratio * 100 }
+        val lastAutosensRatio = lastAutosensData?.let { it.autosensResult.ratio * 100 }
         if (config.AAPSCLIENT && preferences.get(BooleanNonKey.AutosensUsedOnMainPhone) ||
             !config.AAPSCLIENT && constraintChecker.isAutosensModeEnabled().value()
         ) {
@@ -1219,31 +1215,36 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                 }
                     ?: app.aaps.core.objects.R.drawable.ic_x_swap_vert
             )
-        }   */
+        }
 
         // Show variable sensitivity
         val profile = profileFunction.getProfile()
         val request = loop.lastRun?.request
         val isfMgdl = profile?.getProfileIsfMgdl()
-        val isfForCarbs = profile?.getIsfMgdlForCarbs(dateUtil.now(), "Overview", config, processedDeviceStatusData)
+      //  val isfForCarbs = profile?.getIsfMgdlForCarbs(dateUtil.now(), "Overview", config, processedDeviceStatusData)
         val variableSens =
             if (config.APS) request?.variableSens ?: 0.0
             else if (config.AAPSCLIENT) processedDeviceStatusData.getAPSResult()?.variableSens ?: 0.0
             else 0.0
-    //    val ratioUsed = request?.autosensResult?.ratio ?: 1.0
-        val ratioUsed = resistance
+        var ratioUsed = request?.autosensResult?.ratio ?: 1.0
+        if (isfMgdl != null) {
+            ratioUsed = (isfMgdl / variableSens) * 100
+        }
 
-        if (variableSens != isfMgdl && variableSens != 0.0 && isfMgdl != null) {
+        if (variableSens != 0.0 && isfMgdl != null) {
+         //   if (variableSens != isfMgdl && variableSens != 0.0 && isfMgdl != null) {
             val okDialogText: ArrayList<String> = ArrayList()
             val overViewText: ArrayList<String> = ArrayList()
-        //    val autoSensHiddenRange = 0.0             //Hide Autosens value if equals 100%
-       //     val autoSensMax = 100.0 + (preferences.get(DoubleKey.AutosensMax) - 1.0) * autoSensHiddenRange * 100.0
-        //    val autoSensMin = 100.0 + (preferences.get(DoubleKey.AutosensMin) - 1.0) * autoSensHiddenRange * 100.0
-        //    lastAutosensRatio?.let {
-        //        if (it < autoSensMin || it > autoSensMax)
-        //            overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, it))
-        //        okDialogText.add(rh.gs(app.aaps.core.ui.R.string.autosens_long, it))
-        //    }
+         //   val autoSensHiddenRange = 0.0             //Hide Autosens value if equals 100%
+         //   val autoSensMax = 100.0 + (preferences.get(DoubleKey.AutosensMax) - 1.0) * autoSensHiddenRange * 100.0
+         //   val autoSensMin = 100.0 + (preferences.get(DoubleKey.AutosensMin) - 1.0) * autoSensHiddenRange * 100.0
+         //   lastAutosensRatio?.let {
+         //       if (it < autoSensMin || it > autoSensMax)
+         //           overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, it))
+         //       okDialogText.add(rh.gs(app.aaps.core.ui.R.string.autosens_long, it))
+         //   }
+                overViewText.add(rh.gs(app.aaps.core.ui.R.string.autosens_short, ratioUsed))
+                okDialogText.add(rh.gs(app.aaps.core.ui.R.string.autosens_long, ratioUsed))
             overViewText.add(
                 String.format(
                     Locale.getDefault(), "%1$.1f→%2$.1f",
@@ -1254,25 +1255,25 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             binding.infoLayout.sensitivity.text = overViewText.joinToString("\n")
             binding.infoLayout.sensitivity.visibility = View.VISIBLE
             binding.infoLayout.variableSensitivity.visibility = View.GONE
-            if (ratioUsed != 1.0 && ratioUsed != lastAutosensData?.autosensResult?.ratio)
-                okDialogText.add(rh.gs(app.aaps.core.ui.R.string.algorithm_long, ratioUsed?.times(100)))
-            okDialogText.add(rh.gs(app.aaps.core.ui.R.string.isf_for_carbs, profileUtil.fromMgdlToUnits(isfForCarbs ?: 0.0, profileFunction.getUnits())))
-            if (config.APS) {
-                val aps = activePlugin.activeAPS
-                aps.getSensitivityOverviewString()?.let {
-                    okDialogText.add(it)
-                }
-            }
+         //   if (ratioUsed != 1.0 && ratioUsed != lastAutosensData?.autosensResult?.ratio)
+           //     okDialogText.add(rh.gs(app.aaps.core.ui.R.string.algorithm_long, ratioUsed * 100))
+          //  okDialogText.add(rh.gs(app.aaps.core.ui.R.string.isf_for_carbs, profileUtil.fromMgdlToUnits(isfForCarbs ?: 0.0, profileFunction.getUnits())))
+        //    if (config.APS) {
+        //        val aps = activePlugin.activeAPS
+        //        aps.getSensitivityOverviewString()?.let {
+        //            okDialogText.add(it)
+        //        }
+        //    }
             binding.infoLayout.asLayout.setOnClickListener { activity?.let { OKDialog.show(it, rh.gs(app.aaps.core.ui.R.string.sensitivity), okDialogText.joinToString("\n")) } }
 
-        } else {
+        } /*else {
             binding.infoLayout.sensitivity.text =
                 lastAutosensData?.let {
                     rh.gs(app.aaps.core.ui.R.string.autosens_short, it.autosensResult.ratio * 100)
                 } ?: ""
             binding.infoLayout.variableSensitivity.visibility = View.GONE
             binding.infoLayout.sensitivity.visibility = View.VISIBLE
-        }
+        }  */
     }
 
     private fun updatePumpStatus() {

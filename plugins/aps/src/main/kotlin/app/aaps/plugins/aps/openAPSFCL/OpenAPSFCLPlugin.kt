@@ -91,7 +91,7 @@ import kotlin.math.ln
 
 @Singleton
 open class OpenAPSFCLPlugin @Inject constructor(
-   // private val injector: HasAndroidInjector,
+    private val injector: HasAndroidInjector,
     aapsLogger: AAPSLogger,
     private val rxBus: RxBus,
     private val constraintsChecker: ConstraintsChecker,
@@ -107,6 +107,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
     private val processedTbrEbData: ProcessedTbrEbData,
     private val persistenceLayer: PersistenceLayer,
     private val glucoseStatusProvider: GlucoseStatusProvider,
+    private val glucoseStatusCalculatorFCL: GlucoseStatusCalculatorFCL,
     private val tddCalculator: TddCalculator,
     private val bgQualityCheck: BgQualityCheck,
     private val uiInteraction: UiInteraction,
@@ -128,61 +129,19 @@ open class OpenAPSFCLPlugin @Inject constructor(
     aapsLogger, rh
 ), APS, PluginConstraints {
 
-    override fun onStart() {
-        super.onStart()
-        var count = 0
-        val apsResults = persistenceLayer.getApsResults(dateUtil.now() - T.days(1).msecs(), dateUtil.now())
-        apsResults.forEach {
-            val glucose = it.glucoseStatus?.glucose ?: return@forEach
-            val variableSens = it.variableSens ?: return@forEach
-            val timestamp = it.date
-            val key = timestamp - timestamp % T.mins(30).msecs() + glucose.toLong()
-            if (variableSens > 0) dynIsfCache.put(key, variableSens)
-            count++
-        }
-        aapsLogger.debug(LTag.APS, "Loaded $count variable sensitivity values from database")
-    }
+
 
     // last values
     override var lastAPSRun: Long = 0
     override val algorithm = APSResult.Algorithm.SMB
    // override var lastAPSResult: DetermineBasalResult? = null
     override var lastAPSResult: APSResult? = null
-    override fun supportsDynamicIsf(): Boolean = preferences.get(BooleanKey.ApsUseDynamicSensitivity)
+//    override fun supportsDynamicIsf(): Boolean = preferences.get(BooleanKey.ApsUseDynamicSensitivity)
 
-    override fun getIsfMgdl(profile: Profile, caller: String): Double? {
-        val start = dateUtil.now()
-        val multiplier = (profile as ProfileSealed.EPS).value.originalPercentage / 100.0
-        val sensitivity = calculateVariableIsf(start, multiplier)
-        if (sensitivity.second == null)
-            uiInteraction.addNotificationValidTo(
-                Notification.DYN_ISF_FALLBACK, start,
-                rh.gs(R.string.fallback_to_isf_no_tdd, sensitivity.first), Notification.INFO, dateUtil.now() + T.mins(1).msecs()
-            )
-        else
-            uiInteraction.dismissNotification(Notification.DYN_ISF_FALLBACK)
-        profiler.log(LTag.APS, "getIsfMgdl() multiplier=${multiplier} reason=${sensitivity.first} sensitivity=${sensitivity.second} caller=$caller", start)
-        return sensitivity.second
-    }
 
-    override fun getGlucoseStatusData(allowOldData: Boolean): GlucoseStatus? {
-        return glucoseStatusProvider.getGlucoseStatusData(allowOldData)
-    }
+    override fun getGlucoseStatusData(allowOldData: Boolean): GlucoseStatus? =
+        glucoseStatusCalculatorFCL.getGlucoseStatusData(allowOldData)
 
-    override fun getAverageIsfMgdl(timestamp: Long, caller: String): Double? {
-        var count = 0
-        var sum = 0.0
-        val start = timestamp - T.hours(24).msecs()
-        dynIsfCache.forEach { key, value ->
-            if (key in start..timestamp) {
-                count++
-                sum += value
-            }
-        }
-        val sensitivity = if (count == 0) null else sum / count
-        aapsLogger.debug(LTag.APS, "getAverageIsfMgdl() $sensitivity from $count values ${dateUtil.dateAndTimeAndSecondsString(timestamp)} $caller")
-        return sensitivity
-    }
 
     override fun specialEnableCondition(): Boolean {
         return try {
@@ -209,11 +168,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         val smbAlwaysEnabled = true // preferences.get(BooleanKey.ApsUseSmbAlways)
         val uamEnabled = true //preferences.get(BooleanKey.ApsUseUam)
         val advancedFiltering = activePlugin.activeBgSource.advancedFilteringSupported()
-        //val autoSensOrDynIsfSensEnabled = if (preferences.get(BooleanKey.ApsUseDynamicSensitivity)) {
-        //    preferences.get(BooleanKey.ApsDynIsfAdjustSensitivity)
-        //} else {
-        //    preferences.get(BooleanKey.ApsUseAutosens)
-        //}
+
         val autoSensOrDynIsfSensEnabled = false
 
         preferenceFragment.findPreference<SwitchPreference>(BooleanKey.ApsUseSmbAlways.key)?.isVisible = smbEnabled && advancedFiltering
@@ -225,94 +180,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         preferenceFragment.findPreference<AdaptiveIntPreference>(IntKey.ApsUamMaxMinutesOfBasalToLimitSmb.key)?.isVisible = smbEnabled && uamEnabled
     }
 
-    private val dynIsfCache = LongSparseArray<Double>()
 
-    @Synchronized
-    private fun calculateVariableIsf(timestamp: Long, multiplier: Double): Pair<String, Double?> {
-        if (!preferences.get(BooleanKey.ApsUseDynamicSensitivity)) return Pair("OFF", null)
-
-        val result = persistenceLayer.getApsResultCloseTo(timestamp)
-        if (result?.variableSens != null && result.variableSens != 0.0) {
-            //aapsLogger.debug("calculateVariableIsf $caller DB  ${dateUtil.dateAndTimeAndSecondsString(timestamp)} ${result.variableSens}")
-            return Pair("DB", result.variableSens)
-        }
-
-        val glucose = glucoseStatusProvider.glucoseStatusData?.glucose ?: return Pair("GLUC", null)
-        // Round down to 30 min and use it as a key for caching
-        // Add BG to key as it affects calculation
-        val key = timestamp - timestamp % T.mins(30).msecs() + glucose.toLong()
-        val cached = dynIsfCache[key]
-        if (cached != null && timestamp < dateUtil.now()) {
-            //aapsLogger.debug("calculateVariableIsf $caller HIT ${dateUtil.dateAndTimeAndSecondsString(timestamp)} $cached")
-            return Pair("HIT", cached)
-        }
-
-        val dynIsfResult = calculateRawDynIsf(multiplier)
-        if (!dynIsfResult.tddPartsCalculated()) return Pair("TDD miss", null)
-        // no cached result found, let's calculate the value
-        //aapsLogger.debug("calculateVariableIsf $caller CAL ${dateUtil.dateAndTimeAndSecondsString(timestamp)} $sensitivity")
-        dynIsfCache.put(key, dynIsfResult.variableSensitivity)
-        if (dynIsfCache.size() > 1000) dynIsfCache.clear()
-        return Pair("CALC", dynIsfResult.variableSensitivity)
-    }
-
-    internal class DynIsfResult {
-
-        var tdd1D: Double? = null
-        var tdd7D: Double? = null
-        var tddLast24H: Double? = null
-        var tddLast4H: Double? = null
-        var tddLast8to4H: Double? = null
-        var tdd: Double? = null
-        var variableSensitivity: Double? = null
-        var insulinDivisor: Int = 0
-
-        var tddLast24HCarbs = 0.0
-        var tdd7DDataCarbs = 0.0
-        var tdd7DAllDaysHaveCarbs = false
-
-        fun tddPartsCalculated() = tdd1D != null && tdd7D != null && tddLast24H != null && tddLast4H != null && tddLast8to4H != null
-
-        fun log() =
-            "DynIsfResult: tdd1D=$tdd1D tdd7D=$tdd7D tddLast24H=$tddLast24H tddLast4H=$tddLast4H tddLast8to4H=$tddLast8to4H tdd=$tdd variableSensitivity=$variableSensitivity insulinDivisor=$insulinDivisor tdd7DDataCarbs=$tdd7DDataCarbs tdd7DAllDaysHaveCarbs=$tdd7DAllDaysHaveCarbs"
-    }
-
-    private fun calculateRawDynIsf(multiplier: Double): DynIsfResult {
-        val dynIsfResult = DynIsfResult()
-        // DynamicISF specific
-        // without these values DynISF doesn't work properly
-        // Current implementation is fallback to SMB if TDD history is not available. Thus calculated here
-        val glucoseStatus = glucoseStatusProvider.glucoseStatusData
-        dynIsfResult.tdd1D = tddCalculator.averageTDD(tddCalculator.calculate(1, allowMissingDays = false))?.data?.totalAmount
-        tddCalculator.averageTDD(tddCalculator.calculate(7, allowMissingDays = false))?.let {
-            dynIsfResult.tdd7D = it.data.totalAmount
-            dynIsfResult.tdd7DDataCarbs = it.data.carbs
-            dynIsfResult.tdd7DAllDaysHaveCarbs = it.allDaysHaveCarbs
-        }
-        tddCalculator.calculateDaily(-24, 0)?.also {
-            dynIsfResult.tddLast24H = it.totalAmount
-            dynIsfResult.tddLast24HCarbs = it.carbs
-        }
-        dynIsfResult.tddLast4H = tddCalculator.calculateDaily(-4, 0)?.totalAmount
-        dynIsfResult.tddLast8to4H = tddCalculator.calculateDaily(-8, -4)?.totalAmount
-
-        val insulin = activePlugin.activeInsulin
-        dynIsfResult.insulinDivisor = when {
-            insulin.peak > 65 -> 55 // rapid peak: 75
-            insulin.peak > 50 -> 65 // ultra rapid peak: 55
-            else              -> 75 // lyumjev peak: 45
-        }
-
-
-        if (dynIsfResult.tddPartsCalculated() && glucoseStatus != null) {
-            val tddStatus = TddStatus(dynIsfResult.tdd1D!!, dynIsfResult.tdd7D!!, dynIsfResult.tddLast24H!!, dynIsfResult.tddLast4H!!, dynIsfResult.tddLast8to4H!!)
-            val tddWeightedFromLast8H = ((1.4 * tddStatus.tddLast4H) + (0.6 * tddStatus.tddLast8to4H)) * 3
-            dynIsfResult.tdd = ((tddWeightedFromLast8H * 0.33) + (tddStatus.tdd7D * 0.34) + (tddStatus.tdd1D * 0.33)) * preferences.get(IntKey.ApsDynIsfAdjustmentFactor) / 100.0 * multiplier
-            dynIsfResult.variableSensitivity = Round.roundTo(1800 / (dynIsfResult.tdd!! * (ln((glucoseStatus.glucose / dynIsfResult.insulinDivisor) + 1))), 0.1)
-            aapsLogger.debug(LTag.APS, "multiplier=$multiplier dynIsfResult=${dynIsfResult.log()} glucoseStatus=${glucoseStatus.glucose} insulinDivisor=${dynIsfResult.insulinDivisor}")
-        }
-        return dynIsfResult
-    }
 
     override fun invoke(initiator: String, tempBasalFallback: Boolean) {
         aapsLogger.debug(LTag.APS, "invoke from $initiator tempBasalFallback: $tempBasalFallback")
@@ -376,54 +244,7 @@ open class OpenAPSFCLPlugin @Inject constructor(
         }
 
         var autosensResult = AutosensResult()
-        var dynIsfResult: DynIsfResult? = null
-        // var variableSensitivity = 0.0
-        // var tdd = 0.0
-        // var insulinDivisor = 0
-        dynIsfResult = calculateRawDynIsf((profile as ProfileSealed.EPS).value.originalPercentage / 100.0)
-        if (dynIsfMode && !dynIsfResult.tddPartsCalculated()) {
-            uiInteraction.addNotificationValidTo(
-                Notification.SMB_FALLBACK, dateUtil.now(),
-                rh.gs(R.string.fallback_smb_no_tdd), Notification.INFO, dateUtil.now() + T.mins(1).msecs()
-            )
-            inputConstraints.copyReasons(
-                ConstraintObject(false, aapsLogger).also {
-                    it.set(false, rh.gs(R.string.fallback_smb_no_tdd), this)
-                }
-            )
-            inputConstraints.copyReasons(
-                ConstraintObject(false, aapsLogger).apply {
-                    set(true, "tdd1D=${dynIsfResult.tdd1D} tdd7D=${dynIsfResult.tdd7D} tddLast4H=${dynIsfResult.tddLast4H} tddLast8to4H=${dynIsfResult.tddLast8to4H} tddLast24H=${dynIsfResult.tddLast24H}", this)
-                }
-            )
-        }
-        if (dynIsfMode && dynIsfResult.tddPartsCalculated()) {
-            uiInteraction.dismissNotification(Notification.SMB_FALLBACK)
-            // Compare insulin consumption of last 24h with last 7 days average
-            val tddRatio = if (preferences.get(BooleanKey.ApsDynIsfAdjustSensitivity)) dynIsfResult.tddLast24H!! / dynIsfResult.tdd7D!! else 1.0
-            // Because consumed carbs affects total amount of insulin compensate final ratio by consumed carbs ratio
-            // take only 60% (expecting 40% basal). We cannot use bolus/total because of SMBs
-            val carbsRatio = if (
-                preferences.get(BooleanKey.ApsDynIsfAdjustSensitivity) &&
-                dynIsfResult.tddLast24HCarbs != 0.0 &&
-                dynIsfResult.tdd7DDataCarbs != 0.0 &&
-                dynIsfResult.tdd7DAllDaysHaveCarbs
-            ) ((dynIsfResult.tddLast24HCarbs / dynIsfResult.tdd7DDataCarbs - 1.0) * 0.6) + 1.0 else 1.0
-            autosensResult = AutosensResult(
-                ratio = tddRatio / carbsRatio,
-                ratioFromTdd = tddRatio,
-                ratioFromCarbs = carbsRatio
-            )
-        } else {
-            if (constraintsChecker.isAutosensModeEnabled().value()) {
-                val autosensData = iobCobCalculator.getLastAutosensDataWithWaitForCalculationFinish("OpenAPSPlugin")
-                if (autosensData == null) {
-                    rxBus.send(EventResetOpenAPSGui(rh.gs(R.string.openaps_no_as_data)))
-                    return
-                }
-                autosensResult = autosensData.autosensResult
-            } else autosensResult.sensResult = "autosens disabled"
-        }
+
 
         @Suppress("KotlinConstantConditions")
         val iobArray = iobCobCalculator.calculateIobArrayForSMB(autosensResult, SMBDefaults.exercise_mode, SMBDefaults.half_basal_exercise_target, isTempTarget)
@@ -471,9 +292,10 @@ open class OpenAPSFCLPlugin @Inject constructor(
             temptargetSet = isTempTarget,
             autosens_max = preferences.get(DoubleKey.AutosensMax),
             out_units = if (profileFunction.getUnits() == GlucoseUnit.MMOL) "mmol/L" else "mg/dl",
-            variable_sens = if (dynIsfMode) dynIsfResult.variableSensitivity ?: 0.0 else 0.0,
-            insulinDivisor = dynIsfResult.insulinDivisor,
-            TDD = dynIsfResult.tdd ?: 0.0
+            variable_sens = 0.0,
+            insulinDivisor = 0,
+            TDD = 0.0
+
         )
         val microBolusAllowed = true //constraintsChecker.isSMBModeEnabled(ConstraintObject(tempBasalFallback.not(), aapsLogger)).also { inputConstraints.copyReasons(it) }.value()
         val flatBGsDetected = bgQualityCheck.state == BgQualityCheck.State.FLAT
@@ -499,21 +321,37 @@ open class OpenAPSFCLPlugin @Inject constructor(
             microBolusAllowed = microBolusAllowed,
             currentTime = now,
             flatBGsDetected = flatBGsDetected,
-            dynIsfMode = dynIsfMode && dynIsfResult.tddPartsCalculated()
-        ).also {
-          //  val determineBasalResult = DetermineBasalResult(injector, it)
-            val determineBasalResult = apsResultProvider.get().with(it)
+            dynIsfMode = false
+        ).also { rt ->
+
+            val determineBasalResult = apsResultProvider.get().with(rt)
+
             // Preserve input data
             determineBasalResult.inputConstraints = inputConstraints
-            determineBasalResult.autosensResult = autosensResult
             determineBasalResult.iobData = iobArray
             determineBasalResult.glucoseStatus = glucoseStatus
             determineBasalResult.currentTemp = currentTemp
             determineBasalResult.oapsProfileFCL = oapsProfile
             determineBasalResult.mealData = mealData
+
+            // ✅ 1) Zet variableSens EXACT 1x met fallback
+            val usedIsfMgdl = rt.variable_sens?.takeIf { it > 0.0 } ?: oapsProfile.sens
+            determineBasalResult.variableSens = usedIsfMgdl
+
+
+
+            // ✅ 2) Dummy autosens voor consistentie (APSResult-niveau)
+            determineBasalResult.autosensResult = AutosensResult(
+                ratio = 1.0,
+                ratioFromTdd = 1.0,
+                ratioFromCarbs = 1.0,
+                sensResult = "FCLvNext"
+            )
+
             lastAPSResult = determineBasalResult
             lastAPSRun = now
-            aapsLogger.debug(LTag.APS, "Result: $it")
+
+            aapsLogger.debug(LTag.APS, "FCL variableSens mg/dl: $usedIsfMgdl | profile sens mg/dl: ${oapsProfile.sens}")
             rxBus.send(EventAPSCalculationFinished())
         }
 

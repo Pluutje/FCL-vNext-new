@@ -221,7 +221,7 @@ STATUS: (${if (isNight) "'S NACHTS" else "OVERDAG"})
 • Bolus: ${"%.2f".format(bolusAmount)} U
 • Basaal: ${"%.2f".format(basalRate)} U/h
 
-🧪 LAATSTE DOSISSEN
+🧪 LAATSTE DOSIS
 ─────────────────────
 ${formatDeliveryHistory(advice?.let { deliveryHistory.toList() })}
 """.trimIndent()
@@ -255,7 +255,7 @@ ${metricsText ?: "Nog geen data"}
 
         return """
 ════════════════════════
- 🧠 FCL vNext v21.7.0 
+ 🧠 FCL vNext v1.2.0 
 ════════════════════════
 • Profiel              : ${prefs.get(StringKey.fcl_vnext_profile)}
 • Meal Detect Speed  : ${prefs.get(StringKey.fcl_vnext_meal_detect_speed)}

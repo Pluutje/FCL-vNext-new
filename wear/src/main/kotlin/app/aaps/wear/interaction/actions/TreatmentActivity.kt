@@ -37,9 +37,9 @@ class TreatmentActivity : ViewSelectorActivity() {
 
         override fun getPageCount(): Int = 3
 
-        val incrementInsulin1 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement1) * 10).roundToInt() / 10.0
-        val incrementInsulin2 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement2) * 10).roundToInt() / 10.0
-        val stepValuesInsulin = listOf(0.1, incrementInsulin1, incrementInsulin2)
+        val incrementInsulin1 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement1) * 20).roundToInt() / 20.0
+        val incrementInsulin2 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement2) * 20).roundToInt() / 20.0
+        val stepValuesInsulin = listOf(0.05, incrementInsulin1, incrementInsulin2)
         val incrementCarbs1 = preferences.get(IntKey.OverviewCarbsButtonIncrement1).toDouble()
         val incrementCarbs2 = preferences.get(IntKey.OverviewCarbsButtonIncrement2).toDouble()
         val stepValuesCarbs = listOf(1.0, incrementCarbs1, incrementCarbs2)

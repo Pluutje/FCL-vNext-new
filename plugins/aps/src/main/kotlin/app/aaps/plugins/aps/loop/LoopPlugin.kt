@@ -478,6 +478,7 @@ class LoopPlugin @Inject constructor(
             if (usedAPS.isEnabled()) {
                 usedAPS.invoke(initiator, tempBasalFallback)
                 apsResult = usedAPS.lastAPSResult
+
             }
 
             // Check if we have any result

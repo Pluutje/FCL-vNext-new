@@ -35,9 +35,9 @@ class BolusActivity : ViewSelectorActivity() {
 
         override fun getPageCount(): Int = 2
 
-        val increment1 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement1) * 10).roundToInt() / 10.0
-        val increment2 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement2) * 10).roundToInt() / 10.0
-        val stepValues = listOf(0.1, increment1, increment2)
+        val increment1 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement1) * 20).roundToInt() / 20.0
+        val increment2 = (preferences.get(DoubleKey.OverviewInsulinButtonIncrement2) * 20).roundToInt() / 20.0
+        val stepValues = listOf(0.05, increment1, increment2)
 
         override fun instantiateItem(container: ViewGroup, position: Int): View = when (position) {
             0    -> {

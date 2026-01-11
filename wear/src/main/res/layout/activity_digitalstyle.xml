@@ -60,20 +60,20 @@
                     android:weightSum="5">
 
                     <TextView
-                        android:id="@+id/cob1"
+                        android:id="@+id/delta"
                         android:layout_width="match_parent"
                         android:layout_height="0dp"
                         android:layout_marginTop="1dp"
                         android:layout_weight="2"
                         android:fontFamily="@font/roboto_slab_light"
                         android:gravity="bottom|center_horizontal"
-                        android:text="@string/activity_carb"
-                        android:textColor="@color/light_grey"
-                        android:textSize="10sp"
+                        android:text="+/-"
+                        android:textColor="#EEF4E9E9"
+                        android:textSize="11sp"
                         tools:ignore="SmallSp" />
 
                     <TextView
-                        android:id="@+id/cob2"
+                        android:id="@+id/direction"
                         android:layout_width="match_parent"
                         android:layout_height="0dp"
                         android:layout_marginTop="-1dp"
@@ -82,8 +82,8 @@
                         android:gravity="top|center_horizontal"
                         android:letterSpacing="-0.075"
                         android:lines="1"
-                        android:text="@string/cob_000g"
-                        android:textColor="@color/white"
+                        android:text="dir"
+                        android:textColor="#FFFFFF"
                         android:textSize="@dimen/watch_face_digital_sub_text_size" />
 
                 </LinearLayout>
@@ -139,7 +139,7 @@
                             android:layout_weight="2" />
 
                         <TextView
-                            android:id="@+id/direction"
+                            android:id="@+id/cob2"
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_gravity="center_vertical"
@@ -148,14 +148,14 @@
                             android:gravity="center_horizontal|bottom"
                             android:text="--"
                             android:textAlignment="center"
-                            android:textColor="@color/white"
+                            android:textColor="#00FFFFFF"
                             android:textSize="@dimen/watch_face_digital_direction_text_size"
                             android:textStyle="bold"
                             tools:ignore="HardcodedText" />
 
                         <TextView
                             android:id="@+id/timestamp"
-                            android:layout_width="0dp"
+                            android:layout_width="-10dp"
                             android:layout_height="match_parent"
                             android:layout_gravity="center_vertical"
                             android:layout_marginStart="3dp"
@@ -165,7 +165,7 @@
                             android:maxLines="1"
                             android:text="--'"
                             android:textColor="@color/light_grey"
-                            android:textSize="@dimen/watch_face_digital_timestamp_text_size"
+                            android:textSize="15sp"
                             tools:ignore="HardcodedText,SmallSp" />
 
                         <View
@@ -261,7 +261,7 @@
                         android:letterSpacing="-0.075"
                         android:lines="1"
                         android:text="@string/iob_0_00u"
-                        android:textColor="@color/white"
+                        android:textColor="@color/basal_light"
                         android:textSize="@dimen/watch_face_digital_sub_text_size" />
 
                 </LinearLayout>
@@ -336,15 +336,15 @@
 
                         <TextView
                             android:id="@+id/week_number"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="4"
+                            android:layout_width="25dp"
+                            android:layout_height="16dp"
+                            android:layout_weight="5"
                             android:fontFamily="@font/roboto_condensed_light"
-                            android:letterSpacing="-0.1"
+                            android:letterSpacing="0.1"
                             android:textAllCaps="true"
-                            android:textColor="@color/light_grey"
-                            android:textFontWeight="400"
-                            android:textSize="18sp"
+                            android:textColor="#B3BDBAB8"
+                            android:textFontWeight="800"
+                            android:textSize="13sp"
                             tools:text="ww" />
 
                         <View
@@ -493,14 +493,14 @@
                     android:orientation="horizontal">
 
                     <TextView
-                        android:id="@+id/delta"
-                        android:layout_width="0dp"
+                        android:id="@+id/uploader_battery"
+                        android:layout_width="30dp"
                         android:layout_height="match_parent"
                         android:layout_weight="1"
                         android:gravity="center_horizontal|center_vertical"
-                        android:text="+/-"
-                        android:textColor="@color/light_grey"
-                        android:textSize="10sp"
+                        android:text="--%"
+                        android:textColor="#B3BDBAB8"
+                        android:textSize="13sp"
                         android:textStyle="bold"
                         tools:ignore="HardcodedText,SmallSp" />
 
@@ -511,20 +511,20 @@
                         android:layout_weight="1"
                         android:gravity="center_horizontal|center_vertical"
                         android:text="@string/abbreviation_average"
-                        android:textColor="@color/light_grey"
+                        android:textColor="#00BDBDBD"
                         android:textSize="10sp"
                         android:textStyle="bold"
                         tools:ignore="SmallSp" />
 
                     <TextView
-                        android:id="@+id/uploader_battery"
-                        android:layout_width="0dp"
+                        android:id="@+id/cob1"
+                        android:layout_width="wrap_content"
                         android:layout_height="match_parent"
                         android:layout_weight="1"
                         android:gravity="center_horizontal|center_vertical"
                         android:text="--%"
-                        android:textColor="@color/light_grey"
-                        android:textSize="10sp"
+                        android:textColor="#004ACF4F"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         tools:ignore="HardcodedText,SmallSp" />
 
@@ -543,13 +543,13 @@
 
                     <TextView
                         android:id="@+id/basalRate"
-                        android:layout_width="0dp"
+                        android:layout_width="-10dp"
                         android:layout_height="match_parent"
                         android:layout_weight="1.7"
                         android:gravity="center_horizontal|center_vertical"
                         android:text="@string/no_tmp_basal_u_h"
-                        android:textColor="@color/light_grey"
-                        android:textSize="10sp"
+                        android:textColor="@color/basal_light"
+                        android:textSize="13sp"
                         android:textStyle="bold"
                         tools:ignore="SmallSp" />
 
@@ -571,15 +571,15 @@
                 <!--  right side bottom - diagram 6/10 -->
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="6"
+                    android:layout_height="11dp"
+                    android:layout_weight="5"
                     android:baselineAligned="false"
                     android:orientation="vertical"
                     android:weightSum="1">
 
                     <lecho.lib.hellocharts.view.LineChartView
                         android:id="@+id/chart"
-                        android:layout_width="match_parent"
+                        android:layout_width="100dp"
                         android:layout_height="0dp"
                         android:layout_gravity="bottom"
                         android:layout_weight="1"
@@ -598,5 +598,12 @@
         </LinearLayout>
 
     </LinearLayout>
+
+    <!--   FLAGs   -->
+    <View
+        android:id="@+id/AAPSv2"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
 
 </RelativeLayout>
