@@ -372,55 +372,34 @@ open class OpenAPSFCLPlugin @Inject constructor(
         return maxIob
     }
 
-    override fun applyBasalConstraints(absoluteRate: Constraint<Double>, profile: Profile): Constraint<Double> {
-        if (isEnabled()) {
+   override fun applyBasalConstraints(absoluteRate: Constraint<Double>, profile: Profile): Constraint<Double> {
+       if (isEnabled()) {
             var maxBasal = 25.0 //preferences.get(DoubleKey.ApsMaxBasal)
-            if (maxBasal < profile.getMaxDailyBasal()) {
-                maxBasal = profile.getMaxDailyBasal()
-                absoluteRate.addReason(rh.gs(R.string.increasing_max_basal), this)
-            }
             absoluteRate.setIfSmaller(maxBasal, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, maxBasal, rh.gs(R.string.maxvalueinpreferences)), this)
 
-            // Check percentRate but absolute rate too, because we know real current basal in pump
-            val maxBasalMultiplier = 500.0 // preferences.get(DoubleKey.ApsMaxCurrentBasalMultiplier)
-            val maxFromBasalMultiplier = floor(maxBasalMultiplier * profile.getBasal() * 100) / 100
+            val maxFromBasalMultiplier = 25.0
             absoluteRate.setIfSmaller(
-                maxFromBasalMultiplier,
-                rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, maxFromBasalMultiplier, rh.gs(R.string.max_basal_multiplier)),
-                this
+               maxFromBasalMultiplier,
+               rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, maxFromBasalMultiplier, rh.gs(R.string.max_basal_multiplier)),
+               this
             )
-            val maxBasalFromDaily = 500.0 //preferences.get(DoubleKey.ApsMaxDailyMultiplier)
-            val maxFromDaily = floor(profile.getMaxDailyBasal() * maxBasalFromDaily * 100) / 100
+           val maxFromDaily = 25.0
             absoluteRate.setIfSmaller(maxFromDaily, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, maxFromDaily, rh.gs(R.string.max_daily_basal_multiplier)), this)
         }
+
         return absoluteRate
     }
 
     override fun isSMBModeEnabled(value: Constraint<Boolean>): Constraint<Boolean> {
-        val enabled = true //preferences.get(BooleanKey.ApsUseSmb)
-        if (!enabled) value.set(false, rh.gs(R.string.smb_disabled_in_preferences), this)
+        value.set(true)
         return value
     }
 
     override fun isUAMEnabled(value: Constraint<Boolean>): Constraint<Boolean> {
-        val enabled = true // preferences.get(BooleanKey.ApsUseUam)
-        if (!enabled) value.set(false, rh.gs(R.string.uam_disabled_in_preferences), this)
+        value.set(true)
         return value
     }
 
-    override fun isAutosensModeEnabled(value: Constraint<Boolean>): Constraint<Boolean> {
-        if (preferences.get(BooleanKey.ApsUseDynamicSensitivity)) {
-            // DynISF mode
-            if (!preferences.get(BooleanKey.ApsDynIsfAdjustSensitivity))
-                value.set(false, rh.gs(R.string.autosens_disabled_in_preferences), this)
-        } else {
-            // SMB mode
-            // val enabled = preferences.get(BooleanKey.ApsUseAutosens)
-            val enabled = false
-            if (!enabled) value.set(false, rh.gs(R.string.autosens_disabled_in_preferences), this)
-        }
-        return value
-    }
 
     override fun configuration(): JSONObject =
         JSONObject()
