@@ -247,9 +247,11 @@ ${resistanceLog ?: "Geen resistentie-log"}
 ${metricsText ?: "Nog geen data"}
 """.trimIndent()
 
+        // Huidige versie FCL V3
+
         return """
 ════════════════════════
- 🧠 FCL vNext v3.2.0
+ 🧠 FCL vNext V3 v1.1.0
 ════════════════════════
 • Profiel              : ${profileLabel(prefs.get(StringKey.fcl_vnext_profile))}
 • Meal detect          : ${mealDetectLabel(prefs.get(StringKey.fcl_vnext_meal_detect_speed))}

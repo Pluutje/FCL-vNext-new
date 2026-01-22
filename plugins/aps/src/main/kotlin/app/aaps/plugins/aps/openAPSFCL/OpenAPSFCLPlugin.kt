@@ -283,6 +283,8 @@ open class OpenAPSFCLPlugin @Inject constructor(
         val iobArray = iobCobCalculator.calculateIobArrayForSMB(autosensResult, SMBDefaults.exercise_mode, SMBDefaults.half_basal_exercise_target, isTempTarget)
         val mealData = iobCobCalculator.getMealDataWithWaitingForCalculationFinish()
 
+      //  val dia2 = preferences.get(UnitDoubleKey.
+
         @Suppress("KotlinConstantConditions")
         val oapsProfile = OapsProfileFCL(
             dia = 0.0, // not used

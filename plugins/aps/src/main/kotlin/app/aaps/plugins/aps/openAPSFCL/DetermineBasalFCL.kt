@@ -46,6 +46,17 @@ import org.joda.time.Hours
 import app.aaps.core.data.model.SC
 import app.aaps.plugins.aps.openAPSFCL.vnext.model.BGDataPoint
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextStatusFormatter
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsOrchestrator
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.EpisodeTracker
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsEpisodeSummarizer
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsAxisScorer
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsConfidenceAccumulator
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsAdviceEmitter
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.EmptyBgHistoryProvider
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.EmptyInsulinDeliveryProvider
+import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextBgHistoryProvider
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsBgProviderAdapter
+import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsInsulinDeliveryProvider
 
 @Singleton
 
@@ -67,6 +78,26 @@ class DetermineBasalFCL @Inject constructor(
     private val fclActivityModule = FCLActivityModule(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
     private val fclResistance = FCLResistance(preferences = preferences,persistenceLayer = persistenceLayer,context = context)
     private val fclvNext = FCLvNext(preferences)
+    private val bgHistoryProvider = FCLvNextBgHistoryProvider(persistenceLayer)
+
+    private val obsInsulinProvider =
+        FCLvNextObsInsulinDeliveryProvider(
+            cycleMinutes = 5,
+            diaMinutes = 540.0 // pas aan als jij DIA anders wil
+        )
+
+    private val obsOrchestrator =
+        FCLvNextObsOrchestrator(
+            episodeTracker = EpisodeTracker(),
+            summarizer = FCLvNextObsEpisodeSummarizer(
+                bgProvider = FCLvNextObsBgProviderAdapter(bgHistoryProvider),
+                insulinProvider = obsInsulinProvider
+            ),
+            axisScorer = FCLvNextObsAxisScorer(),
+            confidenceAccumulator = FCLvNextObsConfidenceAccumulator(),
+            adviceEmitter = FCLvNextObsAdviceEmitter()
+        )
+
 
 
 
@@ -151,7 +182,7 @@ class DetermineBasalFCL @Inject constructor(
 
  // *************************************************************************************************************
 
-    private fun getHistoricalBGData(hoursBack: Int = 2): List<BGDataPoint> {
+/*   private fun getHistoricalBGData(hoursBack: Int = 2): List<BGDataPoint> {
         val now = dateUtil.now()
         val startTime = now - T.hours(2).msecs()
         val endTime = now
@@ -172,7 +203,7 @@ class DetermineBasalFCL @Inject constructor(
                     iob = 0.0 // Wordt later aangevuld
                 )
             }
-    }
+    }    */
 
 
 
@@ -325,7 +356,18 @@ class DetermineBasalFCL @Inject constructor(
         var basalRate = 0.0
         var shouldDeliver = false
 
-        val bgHistoryPoints = getHistoricalBGData(2)
+     //   val bgHistoryPoints = getHistoricalBGData(2)
+
+        val bgHistoryPoints =
+            bgHistoryProvider
+                .getLastHours(2)
+                .map {
+                    BGDataPoint(
+                        timestamp = it.time,
+                        bg = it.bgMmol,
+                        iob = 0.0
+                    )
+                }
 
         if (bgHistoryPoints.size >= 10) {
             val bgHistoryMmol = bgHistoryPoints.map { it.timestamp to it.bg }
@@ -347,6 +389,23 @@ class DetermineBasalFCL @Inject constructor(
             basalRate = advice.basalRate
             shouldDeliver = advice.shouldDeliver
 
+            val cycleMin = 5.0
+            val commandedU =
+                if (!shouldDeliver) 0.0
+                else bolusAmount + (basalRate * (cycleMin / 60.0))
+
+            val deliveryCheck = obsInsulinProvider.recordCycle(
+                now = DateTime.now(),
+                commandedU = commandedU,
+                currentIob = currentIOB,
+                phase = "DELIVER"
+            )
+
+// optioneel debug:
+            if (!deliveryCheck.ok) {
+                consoleError.add("[OBS] ⚠ delivery mismatch: ${deliveryCheck.reason}")
+            }
+
 
 
 // 1) Log elke cycle (lichtgewicht)
@@ -356,21 +415,41 @@ class DetermineBasalFCL @Inject constructor(
                 target = targetMgdl / 18.0      // mmol/L
             )
 
-// 2) Snapshot (throttled update inside)
-        //    val snapshot = fclMetrics.buildLearningSnapshot(isNight)
-        /*    if (snapshot != null) {
-                fclvNext.pushLearningMetrics(snapshot)
-            }
+            val obsAdviceBundle =
+                obsOrchestrator.onFiveMinuteTick(
+                    now = DateTime.now(),
+                    isNight = isNight,
 
-            val learningAdvice =
-                fclvNext.getUiLearningAdvice(isNight)
+                    peakActive =
+                        advice.statusText.contains("PeakEstimate=WATCHING") ||
+                            advice.statusText.contains("PeakEstimate=CONFIRMED"),
 
-            val learningStatus =
-                fclvNext.getLearningStatus(isNight)
+                    mealSignalActive =
+                        advice.statusText.contains("MealSignal=CONFIRMED") ||
+                            advice.statusText.contains("MealSignal=UNCERTAIN"),
+
+                    prePeakCommitWindow =
+                        advice.statusText.contains("PrePeakCommitWindow=YES"),
+
+                    rescueConfirmed =
+                        advice.statusText.contains("RESCUE") &&
+                            advice.statusText.contains("CONFIRMED"),
+
+                    downtrendLocked =
+                        advice.statusText.contains("DOWNTREND LOCKED"),
+
+                    slope = 0.0,              // later echte waarden
+                    acceleration = 0.0,
+                    deltaToTarget = 0.0,
+                    consistency = 1.0,
+
+                    predictedPeakAtStart = null,
+                    deliveryConfidence = deliveryCheck.confidenceMultiplier
+                )
+
+// Debug / console output (read-only)
 
 
-            val learningPhase =
-                fclvNext.getLearningPhase()   */
 
             val statusFormatter = FCLvNextStatusFormatter(preferences)
 
@@ -390,10 +469,22 @@ class DetermineBasalFCL @Inject constructor(
             uiText.split("\n").forEach { consoleError.add(it) }
             consoleError.add("\n")
 
+            if (obsAdviceBundle != null) {
+                consoleError.add(obsAdviceBundle.debugSummary)
+                obsAdviceBundle.advices.forEach { a ->
+                    consoleError.add(
+                        "[OBS] ${a.axis}/${a.outcome} " +
+                            "conf=${"%.2f".format(a.confidence)} :: ${a.title}"
+                    )
+                }
+            }
+
         } else {
             consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/10")
         }
 
+
+// fun recordCycle
 
         var sens = sensMgdl
 

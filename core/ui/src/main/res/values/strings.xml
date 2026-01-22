@@ -691,6 +691,6 @@
     <!--    Playback-->
     <string name="audio_playback_attribution">"AAPS plays audio"</string>
 
-    <string name="openaps_fcl">FCL v2</string>
-    <string name="fcl_shortname">FCL V2</string>
+    <string name="openaps_fcl">FCL v3</string>
+    <string name="fcl_shortname">FCL V3</string>
 </resources>
