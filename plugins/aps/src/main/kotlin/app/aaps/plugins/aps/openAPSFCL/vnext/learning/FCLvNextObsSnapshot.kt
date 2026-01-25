@@ -14,6 +14,12 @@ enum class AxisStatus {
     STRUCTURAL_SIGNAL // confidence ≥ emitMinConfidence
 }
 
+data class DeliveryGateStatus(
+    val confidence: Double,
+    val ok: Boolean,
+    val reason: String?
+)
+
 data class AxisSnapshot(
     val axis: Axis,
     val percentages: Map<AxisOutcome, Double>, // 0..100, som = 100
@@ -39,5 +45,6 @@ data class FCLvNextObsSnapshot(
 
     // ⬇️ laatste episode
     val lastEpisodeStart: DateTime?,
-    val lastEpisodeEnd: DateTime?
+    val lastEpisodeEnd: DateTime?,
+    val deliveryGateStatus: DeliveryGateStatus?
 )

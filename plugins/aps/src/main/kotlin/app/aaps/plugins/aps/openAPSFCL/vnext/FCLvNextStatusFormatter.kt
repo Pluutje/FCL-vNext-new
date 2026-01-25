@@ -197,13 +197,69 @@ class FCLvNextStatusFormatter(private val prefs: Preferences) {
         return sb.toString().trimEnd()
     }
 
+    private fun humanLearningStatus(status: SnapshotStatus): String =
+        when (status) {
+            SnapshotStatus.INIT ->
+                "⏳ Initialiseren"
+            SnapshotStatus.OBSERVING ->
+                "👀 Observerend"
+            SnapshotStatus.SIGNAL_PRESENT ->
+                "🧠 Lerend"
+        }
+
+
+    private fun humanEpisodePhase(
+        snapshot: FCLvNextObsSnapshot
+    ): String {
+        // Heuristisch, veilig
+        if (!snapshot.activeEpisode || snapshot.activeEpisodeStartedAt == null)
+            return "—"
+
+        return when {
+            snapshot.deliveryConfidence < 0.6 ->
+                "🟡 TAIL (voorzichtig afronden)"
+            else ->
+                "🟢 ACTIEF (insuline-effect verwacht)"
+        }
+    }
+
+    private fun minutesBetween(a: DateTime, b: DateTime): Long =
+        (b.millis - a.millis) / 60000
+
+    private fun buildDeliveryGateBlock(
+        snapshot: FCLvNextObsSnapshot?
+    ): String {
+
+        val gate = snapshot?.deliveryGateStatus
+            ?: return """
+💉 INSULINE CONTROLE
+─────────────────────
+Nog geen delivery-analyse
+""".trimIndent()
+
+        val status =
+            if (gate.confidence >= 0.9) "🟢 OK"
+            else if (gate.confidence >= 0.6) "🟡 Onzeker"
+            else "🔴 Onbetrouwbaar"
+
+        return """
+💉 INSULINE CONTROLE
+─────────────────────
+• Status      : $status
+• Confidence  : ${"%.2f".format(gate.confidence)}
+${gate.reason?.let { "• Opmerking   : $it" } ?: ""}
+""".trimIndent()
+    }
+
+
+
     private fun buildLearningSnapshotBlock(
         snapshot: FCLvNextObsSnapshot?
     ): String {
 
         if (snapshot == null) {
             return """
-📚 LEARNING STATUS
+📚 LEARNING
 ─────────────────────
 Nog geen observaties beschikbaar
 """.trimIndent()
@@ -211,63 +267,63 @@ Nog geen observaties beschikbaar
 
         val sb = StringBuilder()
 
-        sb.append("📚 LEARNING STATUS\n")
+        // ── LEARNING STATUS ─────────────────────
+        sb.append("📚 LEARNING\n")
         sb.append("─────────────────────\n")
-        sb.append("• Laatste analyse : ${snapshot.createdAt.toString("HH:mm:ss")}\n")
-        sb.append("• Episodes       : ${snapshot.totalEpisodes}\n")
-        sb.append("• Delivery conf  : ${"%.2f".format(snapshot.deliveryConfidence)}\n")
-        sb.append("• Status         : ${snapshot.status}\n")
+        sb.append("• Status        : ${humanLearningStatus(snapshot.status)}\n")
+        sb.append("• Episodes      : ${snapshot.totalEpisodes}\n")
+        sb.append("• Delivery conf : ${"%.2f".format(snapshot.deliveryConfidence)}\n")
+        sb.append("• Laatste check : ${snapshot.createdAt.toString("HH:mm:ss")}\n")
 
-        sb.append("\n🧩 EPISODE STATUS\n")
+        // ── EPISODE STATUS ──────────────────────
+        sb.append("\n🧩 EPISODE\n")
         sb.append("─────────────────────\n")
+
+        if (snapshot.activeEpisode && snapshot.activeEpisodeStartedAt != null) {
+            val mins =
+                minutesBetween(snapshot.activeEpisodeStartedAt, DateTime.now())
+
+            sb.append("• Status        : 🟢 ACTIEF\n")
+            sb.append("• Gestart       : ${snapshot.activeEpisodeStartedAt.toString("HH:mm")}\n")
+            sb.append("• Duur          : ${mins} min\n")
+            sb.append("• Fase          : ${humanEpisodePhase(snapshot)}\n")
+        } else {
+            sb.append("• Status        : ⚪ Geen actieve episode\n")
+        }
 
         if (snapshot.lastEpisodeStart != null && snapshot.lastEpisodeEnd != null) {
             val mins =
-                ((snapshot.lastEpisodeEnd.millis - snapshot.lastEpisodeStart.millis) / 60000)
+                minutesBetween(snapshot.lastEpisodeStart, snapshot.lastEpisodeEnd)
 
             sb.append(
-                "• Laatste episode : " +
+                "\n• Laatste episode : " +
                     "${snapshot.lastEpisodeStart.toString("HH:mm")} → " +
                     "${snapshot.lastEpisodeEnd.toString("HH:mm")} " +
                     "(${mins} min)\n"
             )
-        } else {
-            sb.append("• Laatste episode : —\n")
         }
 
-        if (snapshot.activeEpisode && snapshot.activeEpisodeStartedAt != null) {
-            sb.append(
-                "• Actieve episode : sinds " +
-                    snapshot.activeEpisodeStartedAt.toString("HH:mm") + "\n"
-            )
-        } else {
-            sb.append("• Actieve episode : geen\n")
-        }
-
-
+        // ── AXES ────────────────────────────────
         snapshot.axes.forEach { axis ->
-            sb.append("\n")
-            sb.append("${axis.axis}\n")
+            sb.append("\n${axis.axis}\n")
             sb.append("─────────────────────\n")
 
-            val totalEpisodes = snapshot.totalEpisodes.toInt()
-            val nonOkEpisodes = axis.episodesSeen
-            val okEpisodes = (totalEpisodes - nonOkEpisodes).coerceAtLeast(0)
+            val total = snapshot.totalEpisodes.toInt()
+            val nonOk = axis.episodesSeen
+            val ok = (total - nonOk).coerceAtLeast(0)
 
-            // Statusregel
             val statusText = when (axis.status) {
                 AxisStatus.NO_DIRECTION -> "nog geen richting"
                 AxisStatus.WEAK_SIGNAL -> "zwak signaal"
                 AxisStatus.STRUCTURAL_SIGNAL -> "structureel signaal"
             }
 
-            sb.append("• ").append(statusText).append("\n")
+            sb.append("• ${statusText}\n")
 
-            // Detailregel: altijd tonen
             val details = mutableListOf<String>()
 
-            if (okEpisodes > 0) {
-                details.add("${okEpisodes}× OK")
+            if (ok > 0 && nonOk > 0) {
+                details.add("${ok}× OK")
             }
 
             axis.percentages
@@ -275,7 +331,9 @@ Nog geen observaties beschikbaar
                 .sortedByDescending { it.second }
                 .forEach { (outcome, pct) ->
                     val count =
-                        ((pct / 100.0) * nonOkEpisodes).toInt().coerceAtLeast(1)
+                        ((pct / 100.0) * nonOk)
+                            .toInt()
+                            .coerceAtLeast(1)
                     details.add("${count}× ${outcome.name}")
                 }
 
@@ -285,8 +343,9 @@ Nog geen observaties beschikbaar
                     .append(")\n")
             }
 
-            // Extra info alleen als er richting begint te ontstaan
-            if (axis.dominantOutcome != null && axis.status != AxisStatus.NO_DIRECTION) {
+            if (axis.dominantOutcome != null &&
+                axis.status != AxisStatus.NO_DIRECTION
+            ) {
                 sb.append(
                     "  ↳ dominant: ${axis.dominantOutcome} " +
                         "(conf ${"%.2f".format(axis.dominantConfidence)})\n"
@@ -294,9 +353,9 @@ Nog geen observaties beschikbaar
             }
         }
 
-
         return sb.toString().trimEnd()
     }
+
 
 
 
@@ -355,7 +414,7 @@ ${metricsText ?: "Nog geen data"}
 
         return """
 ════════════════════════
- 🧠 FCL vNext V3 v1.6.0
+ 🧠 FCL vNext V3 v1.7.0
 ════════════════════════
 • Profiel              : ${profileLabel(prefs.get(StringKey.fcl_vnext_profile))}
 • Meal detect          : ${mealDetectLabel(prefs.get(StringKey.fcl_vnext_meal_detect_speed))}
@@ -372,6 +431,8 @@ $activityStatus
 $resistanceStatus
 
 ${buildLearningSnapshotBlock(learningSnapshot)}
+
+${buildDeliveryGateBlock(learningSnapshot)}
 
 $metricsStatus
 """.trimIndent()

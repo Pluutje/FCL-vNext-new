@@ -20,6 +20,7 @@ data class Episode(
 enum class ExclusionReason {
     RESCUE_CONFIRMED,
     DOWNTREND_LOCKED,
+    MANUAL_BOLUS,
     DATA_INSUFFICIENT
 }
 
@@ -78,6 +79,10 @@ class EpisodeTracker {
         rescueConfirmed: Boolean,
         downtrendLocked: Boolean,
 
+        // nieuw
+        forceMealConfirm: Boolean,
+        manualBolusDetected: Boolean,
+
         // ⬇️ NIEUW (ruwe context)
         bgMmol: Double,
         targetMmol: Double,
@@ -92,24 +97,26 @@ class EpisodeTracker {
 
         // Exclusion heeft altijd prioriteit: als dit gebeurt willen we episode afsluiten (excluded)
         // (Je kunt later beslissen of je in plaats daarvan "mark" wilt doen en laten doorlopen.)
-        val exclusion = detectExclusion(rescueConfirmed, downtrendLocked)
+     val exclusion = detectExclusion(rescueConfirmed, downtrendLocked, manualBolusDetected)
 
-        // Buffer vullen als we echte BG hebben; anders niet (degraded mode)
-        val hasBg = bgMmol.isFinite()
-        val hasIob = currentIob.isFinite()
-        if (hasBg) {
-            buf.addLast(
-                Tick(
-                    time = now,
-                    bg = bgMmol,
-                    slope = slope,
-                    iob = if (hasIob) currentIob else Double.NaN,
-                    deltaToTarget = deltaToTarget
-                )
-            )
-            // ~3 uur buffer (36 ticks) + beetje marge
-            while (buf.size > BUFFER_MAX_TICKS) buf.removeFirst()
-        }
+
+     // Buffer vullen als we echte BG hebben; anders niet (degraded mode)
+     val hasBg = bgMmol.isFinite()
+     val hasIob = currentIob.isFinite()
+
+     if (hasBg) {
+         buf.addLast(
+             Tick(
+                 time = now,
+                 bg = bgMmol,
+                 slope = slope,
+                 iob = if (hasIob) currentIob else Double.NaN,
+                 deltaToTarget = deltaToTarget
+             )
+         )
+         while (buf.size > BUFFER_MAX_TICKS) buf.removeFirst()
+     }
+
 
         val anyStartSignal = peakActive || mealSignalActive || prePeakCommitWindow
 
@@ -161,13 +168,38 @@ class EpisodeTracker {
                     return null
                 }
 
-                // normal: detect candidate
+                // 0) HARD start via bolus-trigger (forceMealConfirm)
+               // -> start meteen een episode, met retroStart als we BG hebben
+                if (forceMealConfirm) {
+                    val startAt =
+                        if (hasBg) (findRetroStart(now) ?: now)
+                        else now
+
+                    val ep = Episode(
+                        id = nextId++,
+                        startTime = startAt,
+                        endTime = null,
+                        isNight = isNight,
+                        excluded = false,
+                        exclusionReason = null,
+                        qualityScore = clamp(consistency)
+                    )
+                    activeEpisode = ep
+                    state = State.ACTIVE
+                    // reset candidate vars (buffer behouden)
+                    candidateSince = null
+                    candidateRetroStart = null
+                    return EpisodeEvent.Started(ep)
+                }
+
+// 1) normal: detect candidate
                 if (isMealCandidate(now, slope, mealSignalActive)) {
                     state = State.CANDIDATE
                     candidateSince = now
                     candidateRetroStart = findRetroStart(now)
                 }
                 null
+
             }
 
             State.CANDIDATE -> {
@@ -187,8 +219,8 @@ class EpisodeTracker {
                     return null
                 }
 
-                // Confirm?
-                if (isMealConfirmed(now, slope, mealSignalActive)) {
+                // Confirm? (ook als forceMealConfirm actief is)
+                if (forceMealConfirm || isMealConfirmed(now, slope, mealSignalActive)) {
                     val startAt = candidateRetroStart ?: now
                     val ep = Episode(
                         id = nextId++,
@@ -286,17 +318,15 @@ class EpisodeTracker {
 
                 // 2) End condition: IOB onder threshold + BG stabiel + safe zone
                 val canEnd =
-                    if (hasBg) {
-                        val iobOk =
-                            if (hasIob) currentIob < IOB_END_THRESHOLD
-                            else false // zonder iob geen hard end in tail
+                    if (hasBg && hasIob) {
+                        val iobOk = currentIob < IOB_END_THRESHOLD
                         val stableOk = isStable(now)
                         val safeOk = isSafeZone(now, bgMmol, targetMmol, deltaToTarget)
                         iobOk && stableOk && safeOk
                     } else {
-                        // degraded fallback: als signals lang uit zijn en minimumduur gehaald is
-                        inactiveTicks >= END_INACTIVE_TICKS && minutesBetween(ep.startTime, now) >= MIN_EPISODE_MINUTES
+                        false
                     }
+
 
                 if (canEnd) {
                     val finished = ep.copy(endTime = now)
@@ -412,14 +442,17 @@ class EpisodeTracker {
 
     private fun detectExclusion(
         rescueConfirmed: Boolean,
-        downtrendLocked: Boolean
+        downtrendLocked: Boolean,
+        manualBolusDetected: Boolean
     ): ExclusionReason? {
         return when {
             rescueConfirmed -> ExclusionReason.RESCUE_CONFIRMED
             downtrendLocked -> ExclusionReason.DOWNTREND_LOCKED
+            manualBolusDetected -> ExclusionReason.MANUAL_BOLUS
             else -> null
         }
     }
+
 
     private fun clamp(x: Double): Double =
         min(1.0, max(0.0, x))
@@ -473,7 +506,7 @@ class EpisodeTracker {
         private const val RISE_MIN = 0.7
 
         // tail iob end
-        private const val IOB_END_THRESHOLD = 0.30
+        private const val IOB_END_THRESHOLD = 0.20
 
         // hypo bands
         private const val NEAR_HYPO = 4.4

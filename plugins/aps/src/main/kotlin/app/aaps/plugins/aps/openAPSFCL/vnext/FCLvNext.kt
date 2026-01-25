@@ -1403,7 +1403,34 @@ private fun computeEarlyDoseDecision(
   //  if (ctx.input.isNight && ctx.iobRatio >= 0.55) factor *= 0.88
 
 
-    val targetU = (config.maxSMB * factor * config.doseStrengthMul).coerceIn(0.0, config.maxSMB)
+  //  val targetU = (config.maxSMB * factor * config.doseStrengthMul).coerceIn(0.0, config.maxSMB)
+
+    val minEarlyFrac =
+        if (
+            stageToFire == 1 &&
+            ctx.deltaToTarget >= 0.8 &&
+            ctx.slope >= 0.35 &&
+            ctx.consistency >= 0.45
+        ) {
+            // EARLY stage-1 floor:
+            // slope ~0.35  -> ~0.20 * maxSMB
+            // slope >=1.0  -> ~0.30 * maxSMB
+            val t = smooth01((ctx.slope - 0.35) / (1.00 - 0.35))
+            0.20 + t * 0.10
+        } else {
+            0.0
+        }
+
+    val minEarlyU =
+        (config.maxSMB * minEarlyFrac)
+            .coerceIn(0.10, config.maxSMB * 0.35)   // absolute safety rails
+
+
+    val targetU =
+        maxOf(
+            config.maxSMB * factor * config.doseStrengthMul,
+            minEarlyU
+        )
 
 
     return EarlyDoseDecision(

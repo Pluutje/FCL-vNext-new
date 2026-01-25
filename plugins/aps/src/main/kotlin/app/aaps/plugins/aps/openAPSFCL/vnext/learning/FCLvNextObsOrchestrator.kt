@@ -32,15 +32,16 @@ class FCLvNextObsOrchestrator(
     private var learningStore: FCLvNextObsLearningStore? = null
     private var lastFinishedEpisode: Episode? = null
 
+    private var lastDeliveryGateStatus: DeliveryGateStatus? = null
+    private val deliveryGate = FCLvNextObsInsulinDeliveryGate()
+
 
     fun onFiveMinuteTick(
         now: DateTime,
         isNight: Boolean,
-
         peakActive: Boolean,
         mealSignalActive: Boolean,
         prePeakCommitWindow: Boolean,
-
         rescueConfirmed: Boolean,
         downtrendLocked: Boolean,
 
@@ -54,11 +55,46 @@ class FCLvNextObsOrchestrator(
         consistency: Double,
 
         predictedPeakAtStart: Double?,
-        deliveryConfidence: Double
+        deliveryConfidence: Double,
+
+        commandedU: Double,
+        maxBolusU: Double,
+        manualBolusDetected: Boolean
     ): FCLvNextObsAdviceBundle? {
 
+
         lastDeliveryConfidence = deliveryConfidence.coerceIn(0.0, 1.0)
+        // ─────────────────────────────────────────────
+        // 💉 Insulin delivery gate (UI-only observatie)
+        // ─────────────────────────────────────────────
+        val gateCheck = deliveryGate.recordCycle(
+            now = now,
+            commandedU = commandedU,
+            currentIob = currentIob,
+            phase = "DELIVER"
+        )
+
+        lastDeliveryGateStatus =
+            DeliveryGateStatus(
+                confidence = gateCheck.confidenceMultiplier,
+                ok = gateCheck.ok,
+                reason = gateCheck.reason
+            )
+
+
         rebuildSnapshot(now)
+
+        // ─────────────────────────────────────────────
+// Bolus hook -> forceMealConfirm
+// Start episode zodra FCL daadwerkelijk doseert boven X% van maxBolus
+// ─────────────────────────────────────────────
+        val pct = BOLUS_TRIGGER_PCT
+        val bolusTriggerThresholdU = (maxBolusU * pct).coerceAtLeast(MIN_TRIGGER_U)
+        val forceMealConfirm =
+            commandedU.isFinite() &&
+                maxBolusU.isFinite() &&
+                commandedU >= bolusTriggerThresholdU
+
 
         val event = episodeTracker.onFiveMinuteTick(
             now = now,
@@ -71,6 +107,9 @@ class FCLvNextObsOrchestrator(
             rescueConfirmed = rescueConfirmed,
             downtrendLocked = downtrendLocked,
 
+            forceMealConfirm = forceMealConfirm,
+            manualBolusDetected = manualBolusDetected,
+
             bgMmol = bgMmol,
             targetMmol = targetMmol,
             currentIob = currentIob,
@@ -80,6 +119,7 @@ class FCLvNextObsOrchestrator(
             deltaToTarget = deltaToTarget,
             consistency = consistency
         )
+
 
 
         // Alleen iets doen bij einde van episode
@@ -155,6 +195,8 @@ class FCLvNextObsOrchestrator(
         )
     }
 
+
+
     private fun rebuildSnapshot(now: DateTime) {
         val axisSnapshots =
             Axis.entries.map { axis ->
@@ -183,7 +225,8 @@ class FCLvNextObsOrchestrator(
                 status = snapshotStatus,
                 axes = axisSnapshots,
                 lastEpisodeStart = last?.startTime,
-                lastEpisodeEnd = last?.endTime
+                lastEpisodeEnd = last?.endTime,
+                deliveryGateStatus = lastDeliveryGateStatus
             )
     }
 
@@ -195,5 +238,13 @@ class FCLvNextObsOrchestrator(
     }
 
     fun getLastFinishedEpisode(): Episode? = lastFinishedEpisode
+
+    companion object {
+        // bv. 0.20 = start episode als commandedU >= 20% van maxBolus
+        private const val BOLUS_TRIGGER_PCT = 0.30
+        // safety: als maxBolus heel klein is, wil je niet op 0.01U triggeren
+        private const val MIN_TRIGGER_U = 0.20
+    }
+
 
 }

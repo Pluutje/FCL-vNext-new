@@ -201,8 +201,8 @@ fun loadFCLvNextConfig(
         // ✅ Distribution base (BALANCED)
         // (PULSED/SMOOTH schalen dit)
         smallDoseThresholdU = 0.40,
-        microCapFracOfMaxSmb = 0.10,
-        smallCapFracOfMaxSmb = 0.30,
+        microCapFracOfMaxSmb = 0.2,
+        smallCapFracOfMaxSmb = 0.4,
 
         kDelta = 1.00,
         kSlope = 0.45,
@@ -238,17 +238,17 @@ fun loadFCLvNextConfig(
         maxTempBasalRate = 15.0,
 
         // meal detect
-        mealSlopeMin = 0.45,
+        mealSlopeMin = 0.405,
         mealSlopeSpan = 0.8,
-        mealAccelMin = 0.10,
+        mealAccelMin = 0.090,
         mealAccelSpan = 0.6,
-        mealDeltaMin = 0.60,
+        mealDeltaMin = 0.540,
         mealDeltaSpan = 1.0,
         mealUncertainConfidence = 0.30,
         mealConfirmConfidence = 0.60,
 
-        mealDetectThresholdMul = 0.9,
-        microRampThresholdMul = 0.92,
+        mealDetectThresholdMul = 1.0,
+        microRampThresholdMul = 1.0,
         mealConfidenceSpeedMul = 1.1,
 
 
@@ -257,7 +257,7 @@ fun loadFCLvNextConfig(
         correctionHoldSlopeMax = -0.25,
         correctionHoldAccelMax = 0.04,
         correctionHoldDeltaMax = 1.7,
-        smallCorrectionMaxU = 0.2,
+        smallCorrectionMaxU = 0.25,
         smallCorrectionCooldownMinutes = 12,
 
         // absorption / peak

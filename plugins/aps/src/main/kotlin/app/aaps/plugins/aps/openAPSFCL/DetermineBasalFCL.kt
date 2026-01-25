@@ -55,6 +55,7 @@ import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsAdviceEmitter
 import app.aaps.plugins.aps.openAPSFCL.vnext.learning.EmptyBgHistoryProvider
 import app.aaps.plugins.aps.openAPSFCL.vnext.learning.EmptyInsulinDeliveryProvider
 import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextBgHistoryProvider
+import app.aaps.plugins.aps.openAPSFCL.vnext.FCLvNextTrends
 import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsBgProviderAdapter
 import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsInsulinDeliveryProvider
 import app.aaps.plugins.aps.openAPSFCL.vnext.learning.FCLvNextObsLearningStore
@@ -356,6 +357,21 @@ class DetermineBasalFCL @Inject constructor(
                     )
                 }
 
+        val rawBg = bgHistoryPoints.map {
+            FCLvNextTrends.BGPoint(it.timestamp, it.bg)
+        }
+
+        // TODO: vervangen door echte EWMA output zodra die hier beschikbaar is
+        val filteredBg = rawBg
+
+        val trendAnalysis =
+            if (bgHistoryPoints.size >= 5) {
+                FCLvNextTrends.calculateTrends(rawBg, filteredBg)
+            } else {
+                null
+            }
+
+
         if (bgHistoryPoints.size >= 10) {
             val bgHistoryMmol = bgHistoryPoints.map { it.timestamp to it.bg }
             val bgNowMmol = bgHistoryMmol.last().second
@@ -381,6 +397,14 @@ class DetermineBasalFCL @Inject constructor(
                 if (!shouldDeliver) 0.0
                 else bolusAmount + (basalRate * (cycleMin / 60.0))
 
+            // max bolus uit prefs (zelfde als config maxSMB gebruikt)
+            val maxBolusU =
+                if (isNight) preferences.get(DoubleKey.max_bolus_night)
+                else preferences.get(DoubleKey.max_bolus_day)
+
+// TODO later: echte detectie van manual bolus vanuit pump events
+            val manualBolusDetected = false
+
             val deliveryCheck = obsInsulinProvider.recordCycle(
                 now = DateTime.now(),
                 commandedU = commandedU,
@@ -390,8 +414,9 @@ class DetermineBasalFCL @Inject constructor(
 
 // optioneel debug:
             if (!deliveryCheck.ok) {
-                consoleError.add("[OBS] ⚠ delivery mismatch: ${deliveryCheck.reason}")
+                consoleError.add("[OBS] ⚠ delivery mismatch: ${deliveryCheck.reason}\n")
             }
+
 
 
 
@@ -427,16 +452,20 @@ class DetermineBasalFCL @Inject constructor(
                             advice.statusText.contains("DOWNTREND LOCKED"),
 
                         bgMmol = bgNowMmol,
-                        targetMmol = target_bg,
+                        targetMmol = target_bg/18.0,
                         currentIob = currentIOB,
 
-                        slope = 0.0,              // later echte waarden
-                        acceleration = 0.0,
-                        deltaToTarget = 0.0,
-                        consistency = 1.0,
+                        slope = trendAnalysis?.firstDerivative ?: 0.0,
+                        acceleration = trendAnalysis?.secondDerivative ?: 0.0,
+                        deltaToTarget = bgNowMmol - (target_bg / 18.0),
+                        consistency = trendAnalysis?.consistency ?: 0.0,
 
                         predictedPeakAtStart = null,
-                        deliveryConfidence = deliveryCheck.confidenceMultiplier
+                        deliveryConfidence = deliveryCheck.confidenceMultiplier,
+
+                        commandedU = commandedU,
+                        maxBolusU = maxBolusU,
+                        manualBolusDetected = manualBolusDetected
                     )
                 } catch (t: Throwable) {
                     // 🔒 HARD SAFETY NET
@@ -486,6 +515,7 @@ class DetermineBasalFCL @Inject constructor(
         } else {
             consoleError.add("FCLvNext skipped: Need more BG data ${bgHistoryPoints.size}/10")
         }
+
 
 
 // fun recordCycle

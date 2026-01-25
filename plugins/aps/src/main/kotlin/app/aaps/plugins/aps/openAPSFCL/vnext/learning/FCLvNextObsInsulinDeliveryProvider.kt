@@ -110,19 +110,10 @@ class FCLvNextObsInsulinDeliveryProvider(
         // Alleen “fout” noemen als we ook echt iets dachten te leveren
         val meaningfulCommand = commandedU >= 0.05
 
-        val ok =
-            if (!meaningfulCommand) true
-            else mismatch <= tolerance
-
-        val reason =
-            if (!meaningfulCommand) "OK (no meaningful command)"
-            else if (ok) "OK (ΔIOB within tolerance)"
-            else "DELIVERY_MISMATCH: obsΔ=${fmt(observedDelta)} expΔ=${fmt(expectedDelta)} mismatch=${fmt(mismatch)} tol=${fmt(tolerance)}"
-
-        val quality =
-            if (!meaningfulCommand) 1.0
-            else if (ok) 1.0
-            else 0.0   // jij vroeg: bij duidelijke mismatch mag conf naar 0
+        // ⚠️ IOB is vertraagd en ruisgevoelig → hier NOOIT hard beoordelen
+        val ok = true
+        val reason = "Recorded (no hard validation)"
+        val quality = 1.0
 
         val rec = InsulinDeliveryRecord(
             time = now,

@@ -61,19 +61,37 @@ class FCLvNextObsInsulinDeliveryGate(
             return DeliveryCheck(ok = true, confidenceMultiplier = 1.0)
         }
 
-        val deltaIob = buffer.last().iob - buffer.first().iob
+        val first = buffer.first()
+        val last = buffer.last()
 
-        // HARD FAIL: duidelijk geen delivery zichtbaar
-        if (deltaIob <= 0.0) {
+        val deltaIob = last.iob - first.iob
+
+// ─────────────────────────────────────────────
+// Verwachte ΔIOB ≈ commanded − decay
+// (zelfde simpele lineaire benadering als provider)
+// ─────────────────────────────────────────────
+        val cycleMinutes = 5.0
+        val diaMinutes = 540.0   // moet overeenkomen met provider
+        val avgIob = buffer.map { it.iob }.average()
+
+        val decayFrac = (cycleMinutes * buffer.size / diaMinutes)
+            .coerceIn(0.0, 0.30)
+
+        val expectedDecay = avgIob * decayFrac
+        val expectedDelta = sumCommanded - expectedDecay
+
+// Te weinig verwachting → geen oordeel
+        if (expectedDelta <= 0.1) {
             return DeliveryCheck(
-                ok = false,
-                confidenceMultiplier = 0.0,
-                reason = "ΔIOB≤0 while commanded≈${"%.2f".format(sumCommanded)}U"
+                ok = true,
+                confidenceMultiplier = 1.0,
+                reason = "Expected ΔIOB too small for validation"
             )
         }
 
-        val ratio = deltaIob / sumCommanded
-        val mismatch = abs(1.0 - ratio)
+// Vergelijk OBS vs EXPECTED
+        val mismatch = abs(deltaIob - expectedDelta) / expectedDelta
+
 
         val multiplier = when {
             mismatch <= tolOk -> 1.0
@@ -84,13 +102,18 @@ class FCLvNextObsInsulinDeliveryGate(
             }
         }
 
+        val ok = multiplier > 0.0
+
+
         return DeliveryCheck(
-            ok = multiplier > 0.0,
+            ok = ok,
             confidenceMultiplier = multiplier,
-            reason = if (multiplier < 1.0)
-                "IOB mismatch ${"%.0f".format(mismatch * 100)}%"
-            else null
+            reason =
+                if (multiplier < 1.0)
+                    "IOB mismatch ${"%.0f".format(mismatch * 100)}% (expΔ=${"%.2f".format(expectedDelta)}, obsΔ=${"%.2f".format(deltaIob)})"
+                else null
         )
+
     }
 
     fun reset() {
